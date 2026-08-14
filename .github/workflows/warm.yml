@@ -181,11 +181,27 @@ jobs:
 
   # --------------------------------------------------------------------------
   # Codex — uses your ChatGPT subscription via restored auth.json.
-  # FRAGILE: refresh tokens can rotate/expire. We write the refreshed
+  # FRAGILE: refresh tokens rotate on every use. We write the refreshed
   # auth.json back to the secret after the run so cron keeps working.
   # This write-back needs a PAT (secret GH_PAT) with 'secrets: write'.
   # Without GH_PAT the run still works, but you may need to re-login and
   # update CODEX_AUTH_JSON manually every so often.
+  #
+  # RECOVERY — do NOT log in twice (verified 2026-08-14):
+  #   codex login
+  #   gh secret set CODEX_AUTH_JSON --repo <repo> < ~/.codex/auth.json
+  # and then leave it alone. OpenAI issues ONE refresh-token family per
+  # (user, client_id). A second `codex login` REVOKES the token you just
+  # uploaded — CI then fails with code `token_revoked`. An earlier version
+  # of this comment told you to log in again "so your machine gets its own
+  # session"; that is wrong, there is no such thing on one account.
+  #
+  # Consequence: CI and your laptop share one token family. CI self-heals
+  # via the write-back step below as long as it refreshes first. Your
+  # laptop is what knocks it over — a local `codex login` revokes CI
+  # (`token_revoked`), and heavy local use rotates ahead of CI
+  # (`token_expired` / "refresh token was already used"). Either way the
+  # recovery is the two commands above, once.
   # --------------------------------------------------------------------------
   warm-codex:
     runs-on: ubuntu-latest
@@ -346,12 +362,12 @@ jobs:
 
           if [ "$CODEX_FAILED" = "true" ]; then
             body+="### Codex"$'\n'
-            body+='Likely a revoked refresh token (OpenAI has no long-lived CI credential). Fix (run in your own terminal). The SECOND login is required: it gives your machine its own session so it cannot refresh-race the one you just uploaded for CI:'$'\n'
+            body+='Refresh token is dead (OpenAI has no long-lived CI credential). Fix (run in your own terminal):'$'\n'
             body+='```bash'$'\n'
             body+='codex login'$'\n'
             body+="gh secret set CODEX_AUTH_JSON --repo $REPO < ~/.codex/auth.json"$'\n'
-            body+='codex login'$'\n'
             body+='```'$'\n\n'
+            body+='**Do NOT run `codex login` again afterwards.** OpenAI issues one refresh-token family per account, so a second login revokes the token you just uploaded and CI fails with `token_revoked`. Upload the auth.json from your most recent login, then leave it alone.'$'\n\n'
           fi
 
           body+="This issue will auto-close the next time both jobs succeed."
